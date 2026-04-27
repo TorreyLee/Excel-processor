@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel 处理工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .upload-section input[type="file"] {
+            display: block;
+            margin: 10px auto;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .result-section {
+            margin-top: 30px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .json-cell {
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .export-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Excel 处理工具</h1>
+        
+        <!-- 使用说明 -->
+        <div style="margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
+            <h2>使用说明</h2>
+            <ul>
+                <li><strong>支持的文件格式</strong>：.xlsx 和 .xls</li>
+                <li><strong>表头要求</strong>：需包含话题名、服务器版本、工单描述、客服回复四列（顺序不限）</li>
+                <li><strong>处理流程</strong>：先按服务器版本+话题名合并数据，再按设定的切分粒度进行切分</li>
+                <li><strong>JSON切分</strong>：可选择30/50/100条或自定义切分粒度</li>
+                <li><strong>搜索功能</strong>：支持模糊匹配和精确匹配，可搜索话题名</li>
+                <li><strong>导出功能</strong>：可导出全部结果或搜索结果为CSV文件</li>
+                <li><strong>自动索引</strong>：为每个工单信息添加index字段，从1开始按顺序编号</li>
+            </ul>
+        </div>
+        
+        <!-- 模块1：文件处理区 -->
+        <div class="upload-section">
+            <h2>① 文件处理区</h2>
+            <div style="margin: 15px 0;">
+                <label>上传 Excel 文件：</label>
+                <input type="file" id="fileInput" accept=".xlsx,.xls">
+                <small style="color: #666;">（表头需包含：话题名、服务器版本、工单描述、客服回复）</small>
+            </div>
+            <div style="margin: 15px 0;">
+                <label>JSON 切分粒度：</label>
+                <button onclick="setSplitSize(30)">30条</button>
+                <button onclick="setSplitSize(50)">50条</button>
+                <button onclick="setSplitSize(100)">100条</button>
+                <input type="number" id="customSplitSize" min="1" placeholder="自定义" style="width: 100px; margin-left: 10px;">
+            </div>
+            <button onclick="processExcel()">处理文件</button>
+        </div>
+        
+        <!-- 模块2：处理结果查看区 -->
+        <div class="result-section" id="resultSection" style="display: none;">
+            <h2>② 处理结果查看区</h2>
+            
+            <div class="search-section" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px;">
+                <h3>搜索话题名</h3>
+                <textarea id="searchInput" rows="3" placeholder="请输入要搜索的话题名，多个话题名可以用空格、空行、中英文逗号、分号隔开"></textarea>
+                <small style="color: #666; display: block; margin: 5px 0;">分隔符：空格、空行、中英文逗号(,)、分号(;)</small>
+                <div style="margin: 10px 0;">
+                    <label><input type="radio" name="matchMode" value="fuzzy" checked> 模糊匹配</label>
+                    <label style="margin-left: 20px;"><input type="radio" name="matchMode" value="exact"> 精确匹配</label>
+                </div>
+                <button onclick="searchTopics()">搜索</button>
+                <button onclick="resetSearch()">重置</button>
+            </div>
+            
+            <table id="resultTable">
+                <thead>
+                    <tr>
+                        <th>话题名</th>
+                        <th>服务器版本</th>
+                        <th>合并的 JSON 字符串</th>
+                    </tr>
+                </thead>
+                <tbody id="resultBody">
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- 模块3：结果导出区 -->
+        <div class="export-section" id="exportSection" style="display: none;">
+            <h2>③ 结果导出区</h2>
+            <div style="margin-top: 20px; text-align: center;">
+                <button onclick="exportAllResult()">导出全部结果</button>
+                <button onclick="exportSearchResult()">导出搜索结果</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let originalData = []; // 保存原始处理结果
+        let filteredData = []; // 保存过滤后的结果
+        
+        function processExcel() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('请选择一个 Excel 文件');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                
+                // 获取第一个工作表
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                
+                // 处理数据
+                const processedData = processData(jsonData);
+                
+                // 获取切分粒度
+                const customSize = document.getElementById('customSplitSize').value;
+                let splitSize = parseInt(customSize);
+                
+                if (!isNaN(splitSize) && splitSize > 0) {
+                    // 应用切分
+                    originalData = applySplit(processedData, splitSize);
+                } else {
+                    originalData = processedData;
+                }
+                
+                filteredData = originalData; // 初始时过滤结果等于原始结果
+                
+                // 显示结果
+                displayResult(originalData);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        
+        function processData(data) {
+            // 按服务器版本+话题名分组
+            const groupedData = {};
+            
+            data.forEach(row => {
+                const topic = row['话题名'] || '';
+                const serverVersion = row['服务器版本'] || '';
+                if (!topic) return;
+                
+                // 合并工单描述与客服回复为 JSON
+                const jsonObj = {
+                    "描述": row['工单描述'] || '',
+                    "客服回复": row['客服回复'] || ''
+                };
+                
+                // 使用服务器版本+话题名作为key
+                const key = serverVersion + '|' + topic;
+                
+                if (!groupedData[key]) {
+                    groupedData[key] = {
+                        "话题名": topic,
+                        "服务器版本": serverVersion,
+                        "items": []
+                    };
+                }
+                groupedData[key].items.push(jsonObj);
+            });
+            
+            // 转换为结果格式，并为每个对象添加index字段
+            const result = [];
+            for (const key in groupedData) {
+                const group = groupedData[key];
+                // 为每个对象添加index字段
+                const indexedArray = group.items.map((obj, index) => {
+                    return {
+                        "index": index + 1,
+                        ...obj
+                    };
+                });
+                
+                result.push({
+                    "话题名": group.话题名,
+                    "服务器版本": group.服务器版本,
+                    "合并的 JSON 字符串": JSON.stringify(indexedArray, null, 2)
+                });
+            }
+            
+            return result;
+        }
+        
+        function displayResult(data) {
+            const resultBody = document.getElementById('resultBody');
+            resultBody.innerHTML = '';
+            
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item['话题名']}</td>
+                    <td>${item['服务器版本']}</td>
+                    <td class="json-cell">${item['合并的 JSON 字符串']}</td>
+                `;
+                resultBody.appendChild(row);
+            });
+            
+            document.getElementById('resultSection').style.display = 'block';
+            document.getElementById('exportSection').style.display = 'block';
+        }
+        
+        function searchTopics() {
+            const searchInput = document.getElementById('searchInput').value;
+            if (!searchInput.trim()) {
+                alert('请输入要搜索的话题名');
+                return;
+            }
+            
+            // 获取匹配模式
+            const matchMode = document.querySelector('input[name="matchMode"]:checked').value;
+            
+            // 分割搜索词，支持空格、空行、中英文逗号、分号
+            const searchTerms = searchInput.split(/[\s,，;；]+/).filter(term => term.trim() !== '');
+            
+            // 过滤结果
+            if (matchMode === 'exact') {
+                // 精确匹配：话题名必须与搜索词完全相同
+                filteredData = originalData.filter(item => {
+                    return searchTerms.some(term => item['话题名'] === term);
+                });
+            } else {
+                // 模糊匹配：话题名包含搜索词
+                filteredData = originalData.filter(item => {
+                    return searchTerms.some(term => item['话题名'].includes(term));
+                });
+            }
+            
+            // 显示过滤结果
+            displayResult(filteredData);
+            console.log('搜索完成，找到 ' + filteredData.length + ' 条结果，匹配模式：' + (matchMode === 'exact' ? '精确' : '模糊'));
+        }
+        
+        function resetSearch() {
+            document.getElementById('searchInput').value = '';
+            filteredData = originalData;
+            displayResult(originalData);
+            console.log('搜索已重置，显示全部结果');
+        }
+        
+        function exportSearchResult() {
+            if (filteredData.length === 0) {
+                alert('没有可导出的搜索结果');
+                return;
+            }
+            
+            try {
+                console.log('开始导出搜索结果');
+                
+                // 构建CSV内容，添加UTF-8 BOM标记
+                let csvContent = '\ufeff话题名,服务器版本,合并的 JSON 字符串\n';
+                
+                filteredData.forEach(item => {
+                    const topic = item['话题名'];
+                    const serverVersion = item['服务器版本'];
+                    const jsonStr = item['合并的 JSON 字符串'];
+                    
+                    // 处理CSV中的特殊字符
+                    const escapedTopic = '"' + topic.replace(/"/g, '""') + '"';
+                    const escapedServerVersion = '"' + serverVersion.replace(/"/g, '""') + '"';
+                    const escapedJson = '"' + jsonStr.replace(/"/g, '""') + '"';
+                    
+                    csvContent += escapedTopic + ',' + escapedServerVersion + ',' + escapedJson + '\n';
+                });
+                
+                // 创建下载链接，添加BOM标记确保Excel正确识别UTF-8编码
+                const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+                const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', '搜索结果.csv');
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                console.log('搜索结果导出完成');
+            } catch (error) {
+                console.error('导出错误:', error);
+                alert('导出时发生错误: ' + error.message);
+            }
+        }
+        
+        function exportAllResult() {
+            if (originalData.length === 0) {
+                alert('没有可导出的数据');
+                return;
+            }
+            
+            try {
+                console.log('开始导出全部结果');
+                
+                // 构建CSV内容，添加UTF-8 BOM标记
+                let csvContent = '\ufeff话题名,服务器版本,合并的 JSON 字符串\n';
+                
+                originalData.forEach(item => {
+                    const topic = item['话题名'];
+                    const serverVersion = item['服务器版本'];
+                    const jsonStr = item['合并的 JSON 字符串'];
+                    
+                    // 处理CSV中的特殊字符
+                    const escapedTopic = '"' + topic.replace(/"/g, '""') + '"';
+                    const escapedServerVersion = '"' + serverVersion.replace(/"/g, '""') + '"';
+                    const escapedJson = '"' + jsonStr.replace(/"/g, '""') + '"';
+                    
+                    csvContent += escapedTopic + ',' + escapedServerVersion + ',' + escapedJson + '\n';
+                });
+                
+                // 创建下载链接，添加BOM标记确保Excel正确识别UTF-8编码
+                const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+                const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', '处理结果.csv');
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                console.log('全部结果导出完成');
+            } catch (error) {
+                console.error('导出错误:', error);
+                alert('导出时发生错误: ' + error.message);
+            }
+        }
+        
+        function applySplit(data, splitSize) {
+            const result = [];
+            
+            data.forEach(item => {
+                const topic = item['话题名'];
+                const serverVersion = item['服务器版本'];
+                const jsonStr = item['合并的 JSON 字符串'];
+                
+                try {
+                    // 解析JSON数组
+                    const jsonArray = JSON.parse(jsonStr);
+                    
+                    // 按指定粒度切分
+                    for (let i = 0; i < jsonArray.length; i += splitSize) {
+                        const endIndex = Math.min(i + splitSize, jsonArray.length);
+                        const subArray = jsonArray.slice(i, endIndex);
+                        
+                        result.push({
+                            "话题名": topic,
+                            "服务器版本": serverVersion,
+                            "合并的 JSON 字符串": JSON.stringify(subArray, null, 2)
+                        });
+                    }
+                } catch (error) {
+                    console.error('解析JSON时出错:', error);
+                    // 如果解析失败，保持原数据
+                    result.push(item);
+                }
+            });
+            
+            return result;
+        }
+        
+        function setSplitSize(size) {
+            document.getElementById('customSplitSize').value = size;
+        }
+    </script>
+</body>
+</html>
